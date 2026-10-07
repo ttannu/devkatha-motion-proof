@@ -1,0 +1,54 @@
+name: Inspect exact one-shot video on cloud CPU
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install media tools if absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+      - name: Retrieve and bind the exact public proof artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download 37556493713 --repo "$GITHUB_REPOSITORY" \
+            --name ltx098-abstract-one-shot-37556493713 --dir review
+          test "$(sha256sum review/candidate.mp4 | cut -d' ' -f1)" = \
+            '05de015e45550c98b415070aea3716eada13fecc4187b1505c6b9f3f53f61867'
+          test "$(sha256sum review/source.png | cut -d' ' -f1)" = \
+            '531550ac386a533a0ab6a51127f0c0d6d60a4af6174246d9d7daadf7fb6fc9c5'
+      - name: Decode every frame and make a 15-frame contact sheet
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -v error -hwaccel none -i review/candidate.mp4 -f null -
+          ffmpeg -v error -hwaccel none -i review/candidate.mp4 \
+            -vf 'fps=3,scale=256:448:flags=lanczos,tile=3x5' \
+            -frames:v 1 -y review/contact-sheet.jpg
+          ffprobe -v error -count_frames -show_entries \
+            format=duration:stream=codec_type,width,height,r_frame_rate,nb_read_frames \
+            -of json review/candidate.mp4 > review/media.json
+          test -s review/contact-sheet.jpg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ltx098-abstract-15-frame-inspection-${{ github.run_id }}
+          path: |
+            review/contact-sheet.jpg
+            review/media.json
+          retention-days: 7
+          compression-level: 0
