@@ -1,0 +1,62 @@
+name: One-shot licensed free cloud motion proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-ltx098-abstract-v1
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure cloud media decoders
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+      - name: Read-only official provider and license preflight
+        id: preflight
+        run: python3 pilot.py preflight
+      - name: Reserve exactly one attempt before provider call
+        id: reserve
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='ltx098-abstract-motion-v1'
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo 'new=false' >> "$GITHUB_OUTPUT"
+            echo 'This one-shot request was already reserved.'
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA" --jq '.ref'
+            echo 'new=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Ask official free ZeroGPU for one five-second candidate
+        if: steps.reserve.outputs.new == 'true'
+        run: python3 pilot.py run
+      - name: Retain exact candidate or no-candidate receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ltx098-abstract-one-shot-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+      - name: State the limit of this proof
+        if: always()
+        run: |
+          echo 'A successful job or provider request is not a finished Devkatha reel. A returned candidate must pass exact visual and audio QC, model and source rights, and a separate publication gate.' >> "$GITHUB_STEP_SUMMARY"
